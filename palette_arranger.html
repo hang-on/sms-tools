@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SMS Indexed PNG – Palette Arranger</title>
+  <style>
+    :root{--bg:#0b0d10;--panel:#12161b;--muted:#a7b0be;--accent:#2dd4bf;--border:#1f2937}
+    html,body{height:100%}
+    body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif;background:var(--bg);color:#e5e7eb}
+    header{padding:18px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px}
+    header h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+    header .sub{color:var(--muted);font-size:12px}
+    main{padding:16px;display:grid;grid-template-columns:340px 1fr;gap:16px}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    .left{padding:14px}
+    .controls{display:flex;flex-direction:column;gap:10px}
+    .drop{border:1.5px dashed #334155;border-radius:12px;padding:16px;text-align:center;color:var(--muted);background:#0f1318}
+    .drop.drag{border-color:var(--accent);color:#d1fae5}
+    input[type=file]{width:100%}
+    .row{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    button{appearance:none;border:1px solid #334155;background:#0f172a;color:#e5e7eb;padding:10px 12px;border-radius:10px;cursor:pointer;font-weight:600}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .palette{display:grid;grid-template-columns:repeat(8, 1fr);gap:6px;margin-top:8px}
+    .sw{height:22px;border-radius:6px;border:1px solid rgba(255,255,255,.08); position:relative}
+    .sw[data-used="false"]{opacity:.35}
+    .sw .idx{position:absolute;inset:auto 6px 2px auto;font-size:10px;color:#0b0d10;background:#e5e7eb;border-radius:4px;padding:0 4px}
+    .sw.dragging{outline:2px dashed var(--accent);opacity:.8}
+    .panel{border:1px solid var(--border);border-radius:12px;overflow:hidden}
+    .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid var(--border);background:#0e1319;font-size:13px;color:#cbd5e1}
+    .panel .body{padding:12px}
+    canvas{width:100%;height:auto;image-rendering:pixelated;background:#000}
+    .meta{display:flex;gap:10px;flex-wrap:wrap;color:#a7b0be;font-size:12px;margin-top:8px}
+    .note{color:#a7b0be;font-size:12px;margin-top:6px}
+    .kbd{background:#0b1220;border:1px solid #1f2937;padding:1px 6px;border-radius:6px;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace}
+  </style>
+</head>
+<body>
+  <header class="card">
+    <h1>SMS Indexed PNG – Palette Arranger</h1>
+    <span class="sub">Load an indexed PNG (from the converter), reorder the <em>used</em> colors by drag & drop, and save a new indexed PNG.</span>
+  </header>
+
+  <main>
+    <section class="left card">
+      <div class="controls">
+        <div class="drop" id="drop">
+          <div><strong>Drop an indexed PNG here</strong> or use the file picker</div>
+          <div class="meta">Must be <span class="kbd">color type 3</span> (indexed), 8-bit depth. Works great with images from the previous tool.</div>
+        </div>
+        <input id="file" type="file" accept="image/png" />
+        <div class="row">
+          <button id="save" disabled>Save with reordered palette</button>
+        </div>
+        <div class="note">Drag swatches to reorder the palette. Only <strong>used</strong> colors are shown. Unused palette entries are kept after the used block, in their original order.</div>
+        <div id="palInfo" class="meta"></div>
+        <div id="palette" class="palette"></div>
+      </div>
+    </section>
+
+    <section class="right card">
+      <div class="panel">
+        <h3>Preview</h3>
+        <div class="body">
+          <canvas id="canvas"></canvas>
+          <div id="imgMeta" class="meta"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ======= Minimal PNG writer (IHDR/PLTE/[tRNS]/IDAT/IEND) ======= -->
+  <script>
+    const CRC_TABLE = new Uint32Array(256); (function(){ for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); CRC_TABLE[n]=c>>>0; } })();
+    function crc32(buf, off=0, len=buf.length){ let c=0xFFFFFFFF; for(let i=off;i<off+len;i++) c = CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c>>>8); return (c ^ 0xFFFFFFFF)>>>0; }
+    const be32 = n => new Uint8Array([n>>>24 & 255, n>>>16 & 255, n>>>8 & 255, n & 255]);
+    function chunk(typeStr, data){ const type=new TextEncoder().encode(typeStr); const len=be32(data.length); const out=new Uint8Array(12+data.length); out.set(len,0); out.set(type,4); out.set(data,8); const c=crc32(out,4,4+data.length); out.set(be32(c),8+data.length); return out; }
+    function encodeIndexedPNG(indexBytes, width, height, palette, transparency){
+      if(palette.length % 3 !== 0) throw new Error('Palette must be 3*N bytes');
+      const N = palette.length/3; if(N<1||N>256) throw new Error('Palette entries must be 1..256');
+      const sig = new Uint8Array([137,80,78,71,13,10,26,10]);
+      const ihdr = new Uint8Array(13);
+      ihdr.set(be32(width),0); ihdr.set(be32(height),4);
+      ihdr[8]=8; ihdr[9]=3; ihdr[10]=0; ihdr[11]=0; ihdr[12]=0;
+      const IHDR = chunk('IHDR', ihdr);
+      const PLTE = chunk('PLTE', palette);
+      const TRNS = (transparency && transparency.length>0) ? chunk('tRNS', transparency) : null;
+      // raw scanlines (filter 0)
+      const raw = new Uint8Array(height*(1+width));
+      for(let y=0;y<height;y++){ raw[y*(width+1)]=0; raw.set(indexBytes.subarray(y*width,(y+1)*width), y*(width+1)+1); }
+      // minimal zlib (stored blocks)
+      const compressed = (function zlibStore(data){
+        function adler32(buf){ let a=1,b=0; for(let i=0;i<buf.length;i++){ a=(a+buf[i])%65521; b=(b+a)%65521; } return ((b<<16)>>>0)|(a>>>0); }
+        const CMF=0x78, FLG=0x01; const parts=[]; let pos=0;
+        while(pos<data.length){ const len=Math.min(65535,data.length-pos); const isFinal=(pos+len===data.length)?1:0; parts.push(isFinal); parts.push(len&255,(len>>>8)&255,(~len)&255,((~len)>>>8)&255); for(let i=0;i<len;i++) parts.push(data[pos+i]); pos+=len; }
+        const body=new Uint8Array(parts); const ad=adler32(data); const out=new Uint8Array(2+body.length+4);
+        out[0]=CMF; out[1]=FLG; out.set(body,2); out[out.length-4]=(ad>>>24)&255; out[out.length-3]=(ad>>>16)&255; out[out.length-2]=(ad>>>8)&255; out[out.length-1]=ad&255; return out;
+      })(raw);
+      const IDAT = chunk('IDAT', compressed);
+      const IEND = chunk('IEND', new Uint8Array());
+      const totalLen = sig.length+IHDR.length+PLTE.length+(TRNS?TRNS.length:0)+IDAT.length+IEND.length;
+      const png = new Uint8Array(totalLen);
+      let o=0; png.set(sig,o); o+=sig.length; png.set(IHDR,o); o+=IHDR.length; png.set(PLTE,o); o+=PLTE.length; if(TRNS){ png.set(TRNS,o); o+=TRNS.length; } png.set(IDAT,o); o+=IDAT.length; png.set(IEND,o);
+      return png;
+    }
+  </script>
+
+  <!-- ======= App logic ======= -->
+  <script>
+    const drop = document.getElementById('drop');
+    const fileInput = document.getElementById('file');
+    const saveBtn = document.getElementById('save');
+    const paletteEl = document.getElementById('palette');
+    const palInfo = document.getElementById('palInfo');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const imgMeta = document.getElementById('imgMeta');
+
+    let width=0, height=0;
+    let indices=null;           // Uint8Array (w*h)
+    let palette=null;           // Uint8Array (3*N)
+    let trns=null;              // Uint8Array (N) or null
+    let usedOrder=[];           // array of palette indices that are used, current UI order
+    let usedSet=null;           // Set for quick membership
+    let dirty=false;            // true after user reorders
+
+    function parsePNG(buf){
+      const u8 = new Uint8Array(buf);
+      // signature
+      const sig=[137,80,78,71,13,10,26,10]; for(let i=0;i<8;i++){ if(u8[i]!==sig[i]) throw new Error('Not a PNG'); }
+      let off=8; let gotIHDR=false; let plte=null; let trnsLocal=null;
+      while(off < u8.length){
+        const len = (u8[off]<<24)|(u8[off+1]<<16)|(u8[off+2]<<8)|u8[off+3]; off+=4;
+        const type = String.fromCharCode(u8[off],u8[off+1],u8[off+2],u8[off+3]); off+=4;
+        const dataOff=off; off+=len; const crcOff=off; off+=4;
+        if(type==='IHDR'){
+          gotIHDR=true; width=(u8[dataOff]<<24)|(u8[dataOff+1]<<16)|(u8[dataOff+2]<<8)|u8[dataOff+3]; height=(u8[dataOff+4]<<24)|(u8[dataOff+5]<<16)|(u8[dataOff+6]<<8)|u8[dataOff+7];
+          const bitDepth=u8[dataOff+8]; const colorType=u8[dataOff+9];
+          if(bitDepth!==8 || colorType!==3) throw new Error('PNG must be indexed (color type 3) with 8-bit depth.');
+        } else if(type==='PLTE'){
+          plte = u8.slice(dataOff, dataOff+len); // 3*N
+        } else if(type==='tRNS'){
+          trnsLocal = u8.slice(dataOff, dataOff+len); // N alphas
+        } else if(type==='IEND'){
+          break;
+        }
+      }
+      if(!gotIHDR || !plte) throw new Error('Missing IHDR or PLTE.');
+      palette = plte; trns = trnsLocal || null;
+    }
+
+    function loadImageAndIndices(file){
+      return new Promise((resolve,reject)=>{
+        // 1) Parse PLTE/tRNS + IHDR from ArrayBuffer
+        const fr = new FileReader();
+        fr.onload = () => {
+          try{ parsePNG(fr.result); resolve(); } catch(e){ reject(e); }
+        };
+        fr.onerror = reject; fr.readAsArrayBuffer(file);
+      }).then(()=> new Promise((resolve2,reject2)=>{
+        // 2) Load rgba via <img> + canvas to reconstruct indices by matching exact colors from PLTE
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = ()=>{
+          try{
+            width = img.naturalWidth; height = img.naturalHeight;
+            canvas.width = width; canvas.height = height;
+            ctx.clearRect(0,0,width,height); ctx.drawImage(img,0,0);
+            const rgba = ctx.getImageData(0,0,width,height).data;
+            // Build color->paletteIndex map (24-bit RGB key)
+            const map = new Map();
+            for(let i=0;i<palette.length;i+=3){
+              const r=palette[i], g=palette[i+1], b=palette[i+2];
+              const key=(r<<16)|(g<<8)|b; map.set(key, i/3);
+            }
+            const out = new Uint8Array(width*height);
+            const used = new Set();
+            for(let p=0,pi=0; p<rgba.length; p+=4,pi++){
+              const a=rgba[p+3];
+              if(a===0 && trns){ // treat as transparent index if present; we don't know which entry is transparent unless tRNS tells (0 alpha somewhere)
+                // Find the first fully transparent palette entry if any
+                let tIndex = trns.findIndex(v=>v===0);
+                if(tIndex<0) tIndex=0; // fallback
+                out[pi]=tIndex; used.add(tIndex);
+                continue;
+              }
+              const key=(rgba[p]<<16)|(rgba[p+1]<<8)|rgba[p+2];
+              const idx = map.get(key);
+              if(idx===undefined){ reject2(new Error('Pixel color not found in PLTE (image might not be indexed or palette-altered).')); return; }
+              out[pi]=idx; used.add(idx);
+            }
+            indices = out;
+            usedSet = used;
+            const N = palette.length/3;
+            usedOrder = [];
+            for(let i=0;i<N;i++){ if(used.has(i)) usedOrder.push(i); }
+            dirty = false;
+            updateUI();
+            resolve2();
+          } finally { URL.revokeObjectURL(url); }
+        };
+        img.onerror = ()=>{ URL.revokeObjectURL(url); reject2(new Error('Failed to load PNG into an image element.')); };
+        img.src = url;
+      }));
+    }
+
+    function updateUI(){
+      // palette info
+      const usedCount = usedSet? usedSet.size : 0;
+      const total = palette? (palette.length/3) : 0;
+      palInfo.textContent = `${usedCount} used colors • ${total} total palette entries`;
+      // render swatches (used only) in current order
+      paletteEl.innerHTML='';
+      usedOrder.forEach((pi, i)=>{
+        const r=palette[pi*3], g=palette[pi*3+1], b=palette[pi*3+2];
+        const sw=document.createElement('div'); sw.className='sw'; sw.draggable=true; sw.dataset.index=String(pi); sw.dataset.used='true'; sw.style.background=`rgb(${r},${g},${b})`;
+        const tag=document.createElement('div'); tag.className='idx'; tag.textContent=pi;
+        sw.appendChild(tag);
+        attachDnD(sw);
+        paletteEl.appendChild(sw);
+      });
+      // re-render preview with reordered palette applied
+      renderPreview();
+      saveBtn.disabled = !dirty;
+    }
+
+    function buildReorderedPalette(){
+      if(!palette) return null;
+      const N = palette.length/3;
+      const rest = [];
+      for(let i=0;i<N;i++){ if(!usedSet.has(i)) rest.push(i); }
+      const newOrder = usedOrder.concat(rest);
+      const newPLTE = new Uint8Array(palette.length);
+      for(let pos=0; pos<newOrder.length; pos++){
+        const srcIdx = newOrder[pos];
+        newPLTE[pos*3]   = palette[srcIdx*3];
+        newPLTE[pos*3+1] = palette[srcIdx*3+1];
+        newPLTE[pos*3+2] = palette[srcIdx*3+2];
+      }
+      let newTRNS = null;
+      if(trns){
+        newTRNS = new Uint8Array(trns.length);
+        for(let pos=0; pos<newOrder.length; pos++) newTRNS[pos] = trns[newOrder[pos]] ?? 255;
+      }
+      return {newPLTE, newTRNS, newOrder};
+    }
+
+    function buildOldToNewMap(newOrder){
+      const N = newOrder.length; const map = new Uint16Array(N);
+      for(let newPos=0; newPos<N; newPos++) map[newOrder[newPos]] = newPos; // oldIdx -> newIdx
+      return map;
+    }
+
+    function renderPreview(){
+      if(!indices || !palette) return;
+      let plte = palette; let map=null;
+      if(dirty){ const built=buildReorderedPalette(); plte=built.newPLTE; map=buildOldToNewMap(built.newOrder); }
+      const w=width, h=height; const im = ctx.createImageData(w,h);
+      for(let y=0;y<h;y++){
+        for(let x=0;x<w;x++){
+          let idx = indices[y*w+x];
+          if(map) idx = map[idx];
+          const r=plte[idx*3], g=plte[idx*3+1], b=plte[idx*3+2];
+          const o=((y*w+x)<<2); im.data[o]=r; im.data[o+1]=g; im.data[o+2]=b; im.data[o+3]=255;
+        }
+      }
+      canvas.width=w; canvas.height=h; ctx.putImageData(im,0,0); imgMeta.textContent = `${w}×${h}px`;
+    }
+
+    // ---------- Drag & Drop on swatches ----------
+    let dragFrom = null;
+    function attachDnD(el){
+      el.addEventListener('dragstart', e=>{ el.classList.add('dragging'); dragFrom = usedOrder.indexOf(Number(el.dataset.index)); e.dataTransfer.setData('text/plain', String(dragFrom)); });
+      el.addEventListener('dragend', ()=>{ el.classList.remove('dragging'); dragFrom=null; });
+      el.addEventListener('dragover', e=>{ e.preventDefault(); });
+      el.addEventListener('drop', e=>{
+        e.preventDefault();
+        const from = dragFrom ?? Number(e.dataTransfer.getData('text/plain'));
+        const to = usedOrder.indexOf(Number(el.dataset.index));
+        if(from===-1 || to===-1 || from===to) return;
+        const moved = usedOrder.splice(from,1)[0];
+        usedOrder.splice(to,0,moved);
+        dirty = true;
+        updateUI();
+      });
+    }
+
+    // ---------- Save ----------
+    saveBtn.addEventListener('click', ()=>{
+      if(!indices || !palette){ alert('Load an indexed PNG first.'); return; }
+      const built = dirty ? buildReorderedPalette() : null;
+      const outPLTE = dirty ? built.newPLTE : palette;
+      const outTRNS = dirty ? built.newTRNS : trns;
+      let outIdx = indices;
+      if(dirty){
+        const map = buildOldToNewMap(built.newOrder); // old -> new
+        outIdx = new Uint8Array(indices.length);
+        for(let i=0;i<indices.length;i++) outIdx[i] = map[ indices[i] ];
+      }
+      const bytes = encodeIndexedPNG(outIdx, width, height, outPLTE, outTRNS);
+      const blob = new Blob([bytes], {type:'image/png'});
+      const a = document.createElement('a'); a.download='reordered_palette.png'; a.href=URL.createObjectURL(blob); document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+    });
+
+    // ---------- File / DnD load ----------
+    fileInput.addEventListener('change', e=>{ const f=e.target.files&&e.target.files[0]; if(f) load(f); });
+    ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault(); e.stopPropagation(); drop.classList.add('drag');}));
+    ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault(); e.stopPropagation(); drop.classList.remove('drag');}));
+    drop.addEventListener('drop', e=>{ const f=e.dataTransfer.files&&e.dataTransfer.files[0]; if(f) load(f); });
+
+    async function load(file){
+      try{
+        resetState();
+        await loadImageAndIndices(file);
+      } catch(err){
+        console.error(err); alert(err.message||String(err));
+      }
+    }
+
+    function resetState(){ width=height=0; indices=null; palette=null; trns=null; usedOrder=[]; usedSet=null; ctx.clearRect(0,0,canvas.width,canvas.height); paletteEl.innerHTML=''; palInfo.textContent=''; imgMeta.textContent=''; saveBtn.disabled=true; dirty=false; }
+  </script>
+</body>
+</html>
