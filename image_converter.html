@@ -22,10 +22,12 @@
     button.primary{background:var(--accent);border-color:transparent;color:#041214}
     button:disabled{opacity:.5;cursor:not-allowed}
     label{font-size:12px;color:var(--muted)}
-    .row{display:flex;gap:10px;align-items:center;justify-content:space-between}
+    .row{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
     .toggle{display:flex;gap:8px;align-items:center}
     .palette{display:grid;grid-template-columns:repeat(8, 1fr);gap:2px;margin-top:8px}
+    .palette.used{grid-template-columns:repeat(auto-fill, minmax(16px, 1fr));gap:4px}
     .sw{height:16px;border-radius:3px;border:1px solid rgba(255,255,255,.05)}
+    .sw.used{height:18px}
     .gallery{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px}
     .panel{border:1px solid var(--border);border-radius:12px;overflow:hidden}
     .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid var(--border);background:#0e1319;font-size:13px;color:#cbd5e1}
@@ -35,6 +37,9 @@
     .kbd{background:#0b1220;border:1px solid #1f2937;padding:1px 6px;border-radius:6px;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
     footer{padding:10px 16px;color:#94a3b8;border-top:1px solid var(--border);font-size:12px}
     a{color:#93c5fd}
+    details.test summary{cursor:pointer}
+    .ok{color:#10b981}
+    .fail{color:#f87171}
   </style>
 </head>
 <body>
@@ -68,7 +73,16 @@
           <button id="save" disabled>Save indexed PNG</button>
         </div>
 
+        <div class="row">
+          <button id="demo">Load demo image</button>
+          <button id="selftest">Run self test</button>
+        </div>
+
         <div class="palette" id="palette"></div>
+        <details class="test" id="testPanel">
+          <summary>Self-test results</summary>
+          <div id="selfTest" class="meta"></div>
+        </details>
       </div>
     </section>
 
@@ -86,6 +100,8 @@
           <div class="body">
             <canvas id="dstCanvas"></canvas>
             <div class="meta" id="dstMeta"></div>
+            <div class="meta" id="dstColorsMeta"></div>
+            <div class="palette used" id="usedPalette"></div>
           </div>
         </div>
       </div>
@@ -168,30 +184,18 @@
   <!-- ======= Zlib (pako) – minified (MIT) ======= -->
   <script>
   /* PAKO v2.1.0 (stripped build: only deflate) */
-  // Minified pako.deflate (only what we need). To keep this file short, this is a compact build.
-  // Source: https://github.com/nodeca/pako (MIT). Content abbreviated but fully functional for deflate().
-  // NOTE: This embedded build intentionally omits comments to keep size modest.
-  !function(r){"use strict";function n(r){return r>>>0}function e(r,n){return r<<n|r>>>32-n}function t(r){for(var n=0;n<r.length;n++)r[n]=0}
-  function o(r){this.s=r||new Uint32Array(4),this.reset()}o.prototype.reset=function(){this.s[0]=1732584193,this.s[1]=4023233417,this.s[2]=2562383102,this.s[3]=271733878},o.prototype.update=function(r){for(var t=0;t<r.length;t+=64){for(var o=this.s[0],i=this.s[1],f=this.s[2],u=this.s[3],a=new Uint32Array(80),c=0;c<16;c++)a[c]=r[t+4*c]<<24|r[t+4*c+1]<<16|r[t+4*c+2]<<8|r[t+4*c+3];for(c=16;c<80;c++)a[c]=e(a[c-3]^a[c-8]^a[c-14]^a[c-16],1);for(c=0;c<80;c++){var s=Math.floor(c/20),h=[1518500249,1859775393,2400959708,3395469782][s],p=[i&f|~i&u,i^f^u,i&f|i&u|f&u,i^f^u][s],v=(e(o,5)+p+h+a[c]>>>0)|0;u=f,f=i,i=(i<<30|i>>>2)>>>0,o=v}this.s[0]=this.s[0]+o>>>0,this.s[1]=this.s[1]+i>>>0,this.s[2]=this.s[2]+f>>>0,this.s[3]=this.s[3]+u>>>0}},o.prototype.digest=function(){var r=new Uint8Array(20);for(var n=0;n<4;n++){r[4*n]=this.s[n]>>>24,r[4*n+1]=this.s[n]>>>16&255,r[4*n+2]=this.s[n]>>>8&255,r[4*n+3]=255&this.s[n]}return r};
-  function i(r){var n=r.length,e=new Uint8Array(((n+5)/64|0)+1<<6);e.set(r),e[n]=128;var t=8*n;e[e.length-4]=t>>>24&255,e[e.length-3]=t>>>16&255,e[e.length-2]=t>>>8&255,e[e.length-1]=255&t;var i=new o;i.update(e);return i.digest()}
-  function f(r){for(var n=0,e=0;e<r.length;e++)n=(n+r[e])%65521;return n}
-  function u(r,e){for(var t=new Uint8Array(r.length+6),o=i(e),u=f(e),a=0;a<r.length;a++)t[a]=r[a];var c=r.length;return t[c++]=0,t[c++]=0,t[c++]=0,t[c++]=0,t[c++]=0,t[c++]=0,t}
-  // The above is a tiny placeholder. For real compression quality, a full deflate implementation is needed.
-  // To keep this single-file demo lightweight, we embed a compact deflater. Below is a tiny but valid compressor
-  // that stores data uncompressed inside DEFLATE blocks (type=0). This is standards-compliant and works fine for PNG,
-  // though output is larger. If you need high compression, swap for full pako build.
+  // This compact stub outputs a valid zlib stream that stores data in uncompressed DEFLATE blocks (type=0).
+  !function(r){"use strict";
   function adler32_uint8(buf){ let a=1,b=0; for(let i=0;i<buf.length;i++){ a=(a+buf[i])%65521; b=(b+a)%65521; } return ((b<<16)>>>0)|(a>>>0); }
   function zlibStore(data){
-    // Build a zlib stream with no compression (stored blocks)
     const CMF = 0x78; // 32K window, deflate
-    const FLG = 0x01; // set so (CMF*256+FLG)%31==0; 0x7801 is standard
-    // Stored blocks (type=0)
+    const FLG = 0x01; // 0x7801 satisfies (CMF*256+FLG)%31==0
     const parts = [];
     let pos = 0;
     while(pos < data.length){
       const len = Math.min(65535, data.length - pos);
-      const isFinal = (pos + len === data.length) ? 1 : 0;
-      parts.push(isFinal); // BFINAL + BTYPE(00)
+      const isFinal = (pos + len === data.length) ? 1 : 0; // BFINAL
+      parts.push(isFinal); // BTYPE=00 (stored)
       parts.push(len & 0xFF, (len>>>8) & 0xFF, (~len) & 0xFF, ((~len)>>>8) & 0xFF);
       for(let i=0;i<len;i++) parts.push(data[pos+i]);
       pos += len;
@@ -199,12 +203,12 @@
     const body = new Uint8Array(parts);
     const ad = adler32_uint8(data);
     const out = new Uint8Array(2 + body.length + 4);
-    out[0]=CMF; out[1]=FLG;
+    out[0]=CMF; out[1]=FLG; // zlib header
     out.set(body,2);
     out[out.length-4] = (ad>>>24)&255;
     out[out.length-3] = (ad>>>16)&255;
     out[out.length-2] = (ad>>>8)&255;
-    out[out.length-1] = ad & 255;
+    out[out.length-1] = ad & 255; // Adler-32
     return out;
   }
   r.pako={deflate:zlibStore};
@@ -213,6 +217,14 @@
 
   <!-- ======= App logic ======= -->
   <script>
+    // Global DOM refs (assigned in initUI)
+    let fileInput, drop, processBtn, saveBtn, demoBtn, selfTestBtn,
+        ditherEl, alphaEl, srcCanvas, dstCanvas,
+        srcMeta, dstMeta, dstColorsMeta, usedPaletteEl, paletteEl, selfTestEl;
+
+    // Current image state
+    let current = {width:0,height:0, srcImageData:null, indices:null};
+
     // Build the Sega Master System fixed 64-color palette (levels 0,85,170,255 per channel)
     function buildSMSPalette(){
       const steps=[0,85,170,255];
@@ -222,16 +234,15 @@
     }
     const SMS_PALETTE = buildSMSPalette();
 
-    // Display palette swatches
-    (function renderPalette(){
-      const p = document.getElementById('palette');
+    function renderFullPalette(){
+      paletteEl.innerHTML='';
       SMS_PALETTE.forEach((c)=>{
         const d=document.createElement('div');
         d.className='sw';
         d.style.background = `rgb(${c.r},${c.g},${c.b})`;
-        p.appendChild(d);
+        paletteEl.appendChild(d);
       });
-    })();
+    }
 
     function sq(x){return x*x}
     function nearestIndex(r,g,b){
@@ -260,7 +271,7 @@
           if(dither){
             // Floyd–Steinberg
             let er=r-nr, eg=g-ng, eb=b-nb;
-            function add(x,y,fr){ if(x<0||x>=width||y<0||y>=height) return; const j=((y*width+x)<<2); rgba[j]+=er*fr; rgba[j+1]+=eg*fr; rgba[j+2]+=eb*fr; }
+            function add(x2,y2,fr){ if(x2<0||x2>=width||y2<0||y2>=height) return; const j=((y2*width+x2)<<2); rgba[j]+=er*fr; rgba[j+1]+=eg*fr; rgba[j+2]+=eb*fr; }
             add(x+1,y,7/16); add(x-1,y+1,3/16); add(x,y+1,5/16); add(x+1,y+1,1/16);
           }
         }
@@ -281,19 +292,28 @@
       return out;
     }
 
-    // I/O & UI
-    const fileInput = document.getElementById('file');
-    const drop = document.getElementById('drop');
-    const processBtn = document.getElementById('process');
-    const saveBtn = document.getElementById('save');
-    const ditherEl = document.getElementById('dither');
-    const alphaEl = document.getElementById('preserveAlpha');
-    const srcCanvas = document.getElementById('srcCanvas');
-    const dstCanvas = document.getElementById('dstCanvas');
-    const srcMeta = document.getElementById('srcMeta');
-    const dstMeta = document.getElementById('dstMeta');
+    function rgbToHex(r,g,b){ return '#' + [r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); }
 
-    let current = {width:0,height:0, srcImageData:null, indices:null};
+    function renderUsedPalette(indices){
+      usedPaletteEl.innerHTML='';
+      if(!indices) { dstColorsMeta.textContent=''; return; }
+      const counts = new Array(SMS_PALETTE.length).fill(0);
+      for(let i=0;i<indices.length;i++) counts[indices[i]]++;
+      const used = [];
+      for(let i=0;i<counts.length;i++) if(counts[i]>0) used.push({idx:i,count:counts[i]});
+      used.sort((a,b)=>b.count-a.count);
+      const total = indices.length;
+      dstColorsMeta.textContent = `${used.length} unique colors in converted image`;
+      used.forEach(({idx,count})=>{
+        const c = SMS_PALETTE[idx];
+        const sw = document.createElement('div');
+        sw.className = 'sw used';
+        sw.style.background = `rgb(${c.r},${c.g},${c.b})`;
+        const pct = ((count/total)*100).toFixed(1);
+        sw.title = `Index ${idx} • ${rgbToHex(c.r,c.g,c.b)} • ${count} px (${pct}%)`;
+        usedPaletteEl.appendChild(sw);
+      });
+    }
 
     function loadImage(file){
       const url = URL.createObjectURL(file);
@@ -309,50 +329,150 @@
         current = {width:w,height:h, srcImageData:src, indices:null};
         srcMeta.textContent = `${w}×${h}px`;
         dstMeta.textContent = '';
+        dstColorsMeta.textContent = '';
+        usedPaletteEl.innerHTML='';
         processBtn.disabled=false; saveBtn.disabled=true;
       };
       img.onerror = ()=>{ URL.revokeObjectURL(url); alert('Failed to load image.'); };
       img.src=url;
     }
 
-    fileInput.addEventListener('change', (e)=>{ if(e.target.files && e.target.files[0]) loadImage(e.target.files[0]); });
+    function makeDemoImageData(size=96){
+      const c = document.createElement('canvas');
+      c.width=c.height=size; const g=c.getContext('2d');
+      // gradient + checker
+      const grd=g.createLinearGradient(0,0,size,size);
+      grd.addColorStop(0,'#ff0080'); grd.addColorStop(.5,'#00ffff'); grd.addColorStop(1,'#202020');
+      g.fillStyle=grd; g.fillRect(0,0,size,size);
+      g.globalAlpha=.5; g.fillStyle='#000';
+      for(let y=0;y<size;y+=8){ for(let x=0;x<size;x+=8){ if(((x+y)/8)%2===0) g.fillRect(x,y,8,8); }}
+      g.globalAlpha=1;
+      return g.getImageData(0,0,size,size);
+    }
 
-    ;['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); e.stopPropagation(); drop.classList.add('drag');}));
-    ;['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); e.stopPropagation(); drop.classList.remove('drag');}));
-    drop.addEventListener('drop', (e)=>{ const f=e.dataTransfer.files&&e.dataTransfer.files[0]; if(f) loadImage(f); });
+    function runSelfTests(){
+      const out=[];
+      // T1: DOM elements present
+      const t1 = (!!srcCanvas && !!dstCanvas);
+      out.push(`<div>${t1?'<span class="ok">✔</span>':'<span class="fail">✖</span>'} Canvases present (#srcCanvas, #dstCanvas)</div>`);
+      // T2: Palette size
+      const t2 = (Array.isArray(SMS_PALETTE) && SMS_PALETTE.length===64);
+      out.push(`<div>${t2?'<span class="ok">✔</span>':'<span class="fail">✖</span>'} SMS palette length = 64</div>`);
+      // T3: PNG encoder round-trip (1x1)
+      let t3=false; try{
+        const idx = new Uint8Array([1]);
+        const pal = new Uint8Array(64*3); for(let i=0;i<64;i++){ const c=SMS_PALETTE[i]; pal[i*3]=c.r; pal[i*3+1]=c.g; pal[i*3+2]=c.b; }
+        const png = encodeIndexedPNG(idx,1,1,pal);
+        t3 = png && png.length>50 && png[0]===137 && png[1]===80 && png[2]===78 && png[3]===71; // PNG signature
+      }catch(e){ t3=false; }
+      out.push(`<div>${t3?'<span class="ok">✔</span>':'<span class="fail">✖</span>'} PNG encoder emits valid signature</div>`);
+      // T4: Quantizer indices within range
+      let t4=false; try{
+        const demo = makeDemoImageData(8);
+        const indices = quantizeToSMS(demo,{});
+        t4 = indices.every(v=>v>=0 && v<64);
+      }catch(e){ t4=false; }
+      out.push(`<div>${t4?'<span class="ok">✔</span>':'<span class="fail">✖</span>'} Quantizer outputs indices in [0..63]</div>`);
 
-    processBtn.addEventListener('click', ()=>{
-      if(!current.srcImageData) return;
-      const indices = quantizeToSMS(current.srcImageData, {dither:ditherEl.checked, preserveAlpha:alphaEl.checked});
-      current.indices = indices;
-      const imgData = indicesToImageData(indices, current.width, current.height);
-      const ctx = dstCanvas.getContext('2d');
-      ctx.putImageData(imgData,0,0);
-      dstMeta.textContent = `${current.width}×${current.height}px • palette: 64 colors max`;
-      saveBtn.disabled=false;
-    });
+      selfTestEl.innerHTML = out.join('');
+      document.getElementById('testPanel').open = true;
+    }
 
-    saveBtn.addEventListener('click', ()=>{
-      if(!current.indices){ alert('Nothing to save yet. Convert first.'); return; }
-      // Build PLTE from SMS palette (full 64 entries). If you want a minimal palette, you could detect used indices.
-      const PAL = new Uint8Array(SMS_PALETTE.length*3);
-      for(let i=0;i<SMS_PALETTE.length;i++){ const c=SMS_PALETTE[i]; PAL[i*3]=c.r; PAL[i*3+1]=c.g; PAL[i*3+2]=c.b; }
-      // Optional tRNS: here we either set index 0 transparency to 0 if preserveAlpha enabled & any fully transparent pixel exists
-      let trns=null;
-      if(alphaEl.checked){
-        const aSrc = current.srcImageData.data;
-        let anyTransparent=false;
-        for(let i=0;i<aSrc.length;i+=4){ if(aSrc[i+3]===0){ anyTransparent=true; break; } }
-        if(anyTransparent){ trns=new Uint8Array(64); trns[0]=0; for(let i=1;i<64;i++) trns[i]=255; }
+    function initUI(){
+      // Cache elements
+      fileInput = document.getElementById('file');
+      drop = document.getElementById('drop');
+      processBtn = document.getElementById('process');
+      saveBtn = document.getElementById('save');
+      demoBtn = document.getElementById('demo');
+      selfTestBtn = document.getElementById('selftest');
+      ditherEl = document.getElementById('dither');
+      alphaEl = document.getElementById('preserveAlpha');
+      srcCanvas = document.getElementById('srcCanvas');
+      dstCanvas = document.getElementById('dstCanvas');
+      srcMeta = document.getElementById('srcMeta');
+      dstMeta = document.getElementById('dstMeta');
+      dstColorsMeta = document.getElementById('dstColorsMeta');
+      usedPaletteEl = document.getElementById('usedPalette');
+      paletteEl = document.getElementById('palette');
+      selfTestEl = document.getElementById('selfTest');
+
+      if(!srcCanvas || !dstCanvas){
+        console.error('Required canvas elements not found.');
+        // Also surface visibly for debugging
+        if(selfTestEl){ selfTestEl.innerHTML = '<span class="fail">Canvases missing. Check that #srcCanvas and #dstCanvas exist.</span>'; document.getElementById('testPanel').open = true; }
+        return;
       }
-      const bytes = encodeIndexedPNG(current.indices, current.width, current.height, PAL, trns);
-      const blob = new Blob([bytes], {type:'image/png'});
-      const a = document.createElement('a');
-      a.download = 'converted_sms_indexed.png';
-      a.href = URL.createObjectURL(blob);
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
-    });
+
+      renderFullPalette();
+
+      // File input & DnD
+      fileInput.addEventListener('change', (e)=>{ if(e.target.files && e.target.files[0]) loadImage(e.target.files[0]); });
+      ;['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); e.stopPropagation(); drop.classList.add('drag');}));
+      ;['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); e.stopPropagation(); drop.classList.remove('drag');}));
+      drop.addEventListener('drop', (e)=>{ const f=e.dataTransfer.files&&e.dataTransfer.files[0]; if(f) loadImage(f); });
+
+      // Process
+      processBtn.addEventListener('click', ()=>{
+        if(!current.srcImageData) return;
+        const indices = quantizeToSMS(current.srcImageData, {dither:ditherEl.checked, preserveAlpha:alphaEl.checked});
+        current.indices = indices;
+        const imgData = indicesToImageData(indices, current.width, current.height);
+        const ctx = dstCanvas.getContext('2d');
+        ctx.putImageData(imgData,0,0);
+        dstMeta.textContent = `${current.width}×${current.height}px • palette: 64 colors max`;
+        renderUsedPalette(indices);
+        saveBtn.disabled=false;
+      });
+
+      // Save
+      saveBtn.addEventListener('click', ()=>{
+        if(!current.indices){ alert('Nothing to save yet. Convert first.'); return; }
+        const PAL = new Uint8Array(SMS_PALETTE.length*3);
+        for(let i=0;i<SMS_PALETTE.length;i++){ const c=SMS_PALETTE[i]; PAL[i*3]=c.r; PAL[i*3+1]=c.g; PAL[i*3+2]=c.b; }
+        let trns=null;
+        if(alphaEl.checked){
+          const aSrc = current.srcImageData.data;
+          let anyTransparent=false;
+          for(let i=0;i<aSrc.length;i+=4){ if(aSrc[i+3]===0){ anyTransparent=true; break; } }
+          if(anyTransparent){ trns=new Uint8Array(64); trns[0]=0; for(let i=1;i<64;i++) trns[i]=255; }
+        }
+        const bytes = encodeIndexedPNG(current.indices, current.width, current.height, PAL, trns);
+        const blob = new Blob([bytes], {type:'image/png'});
+        const a = document.createElement('a');
+        a.download = 'converted_sms_indexed.png';
+        a.href = URL.createObjectURL(blob);
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+      });
+
+      // Demo image
+      demoBtn.addEventListener('click', ()=>{
+        const demo = makeDemoImageData(128);
+        srcCanvas.width=demo.width; srcCanvas.height=demo.height;
+        dstCanvas.width=demo.width; dstCanvas.height=demo.height;
+        const ctx = srcCanvas.getContext('2d');
+        ctx.putImageData(demo,0,0);
+        current = {width:demo.width,height:demo.height, srcImageData:demo, indices:null};
+        srcMeta.textContent = `${demo.width}×${demo.height}px (demo)`;
+        dstMeta.textContent = '';
+        dstColorsMeta.textContent = '';
+        usedPaletteEl.innerHTML='';
+        processBtn.disabled=false; saveBtn.disabled=true;
+      });
+
+      // Self test
+      selfTestBtn.addEventListener('click', runSelfTests);
+
+      // Optional: run a quick startup test so users see green checks
+      runSelfTests();
+    }
+
+    if(document.readyState === 'loading'){
+      document.addEventListener('DOMContentLoaded', initUI);
+    } else {
+      initUI();
+    }
   </script>
 </body>
 </html>
