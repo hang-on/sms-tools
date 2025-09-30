@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sega Master System – Image Viewer & Palette Converter</title>
+  <title>Sega Master System – Image Viewer & Palette Converter</title>\n  <link rel=\"icon\" type=\"image/svg+xml\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' ry='12' fill='%230b0d10'/%3E%3Cpath d='M8 40 L24 16 L40 40 Z' fill='%232dd4bf'/%3E%3Crect x='44' y='24' width='12' height='16' fill='%23a7b0be'/%3E%3C/svg%3E\" />
   <style>
     :root{--bg:#0b0d10;--panel:#12161b;--muted:#a7b0be;--accent:#2dd4bf;--border:#1f2937}
     html,body{height:100%}
@@ -43,7 +43,6 @@
   </style>
 </head>
 <body>
-  <div id="bootBanner" style="position:fixed;inset:auto 16px 16px 16px;background:#111827;color:#e5e7eb;border:1px solid #374151;border-radius:10px;padding:8px 10px;font:12px/1.2 ui-sans-serif,system-ui">Preview loaded. If this box stays forever, JS didn't run—check the Self-test panel for errors.</div>
   <header class="card">
     <h1>SMS Image Viewer & Palette Converter</h1>
     <span class="sub">Single‑file HTML • Converts any PNG to Sega Master System’s 64‑color palette and saves a <strong>paletted (indexed) PNG</strong></span>
@@ -74,16 +73,7 @@
           <button id="save" disabled>Save indexed PNG</button>
         </div>
 
-        <div class="row">
-          <button id="demo">Load demo image</button>
-          <button id="selftest">Run self test</button>
-        </div>
-
         <div class="palette" id="palette"></div>
-        <details class="test" id="testPanel">
-          <summary>Self-test results</summary>
-          <div id="selfTest" class="meta"></div>
-        </details>
       </div>
     </section>
 
@@ -158,9 +148,9 @@
   <!-- ======= App logic ======= -->
   <script>
     // Globals assigned in initUI
-    let fileInput, drop, saveBtn, demoBtn, selfTestBtn,
+    let fileInput, drop, saveBtn,
         ditherEl, alphaEl, srcCanvas, dstCanvas,
-        srcMeta, dstMeta, dstColorsMeta, usedPaletteEl, paletteEl, selfTestEl;
+        srcMeta, dstMeta, dstColorsMeta, usedPaletteEl, paletteEl;
 
     let current = {width:0,height:0, srcImageData:null, indices:null};
 
@@ -199,34 +189,21 @@
 
     function makeDemoImageData(size=96){ const c=document.createElement('canvas'); c.width=c.height=size; const g=c.getContext('2d'); const grd=g.createLinearGradient(0,0,size,size); grd.addColorStop(0,'#ff0080'); grd.addColorStop(.5,'#00ffff'); grd.addColorStop(1,'#202020'); g.fillStyle=grd; g.fillRect(0,0,size,size); g.globalAlpha=.5; g.fillStyle='#000'; for(let y=0;y<size;y+=8){ for(let x=0;x<size;x+=8){ if(((x+y)/8)%2===0) g.fillRect(x,y,8,8); } } g.globalAlpha=1; return g.getImageData(0,0,size,size); }
 
-    function parsePngChunks(png){ const out=[]; let off=8; while(off+8<=png.length){ const len=(png[off]<<24)|(png[off+1]<<16)|(png[off+2]<<8)|png[off+3]; off+=4; const type=String.fromCharCode(png[off],png[off+1],png[off+2],png[off+3]); off+=4; off+=len; off+=4; out.push({type,length:len}); if(type==='IEND') break; } return out; }
-
-    function runSelfTests(){ try{ const bb=document.getElementById('bootBanner'); if(bb) bb.remove(); }catch(_){} const out=[]; const ok=x=>`<span class="ok">✔</span> ${x}`; const bad=x=>`<span class="fail">✖</span> ${x}`;
-      const t1=(!!srcCanvas && !!dstCanvas); out.push(`<div>${t1?ok('Canvases present (#srcCanvas, #dstCanvas)'):bad('Canvases missing')}</div>`);
-      const t2=(Array.isArray(SMS_PALETTE)&&SMS_PALETTE.length===64); out.push(`<div>${t2?ok('SMS palette length = 64'):bad('Wrong palette length')}</div>`);
-      let t3=false; try{ const idx=new Uint8Array([1]); const pal=new Uint8Array(64*3); for(let i=0;i<64;i++){ const c=SMS_PALETTE[i]; pal[i*3]=c.r; pal[i*3+1]=c.g; pal[i*3+2]=c.b; } const png=encodeIndexedPNG(idx,1,1,pal); t3=png&&png.length>50&&png[0]===137&&png[1]===80&&png[2]===78&&png[3]===71; }catch(e){ t3=false; } out.push(`<div>${t3?ok('PNG encoder emits valid signature'):bad('PNG signature invalid')}</div>`);
-      let t4=false; try{ const demo=makeDemoImageData(8); const indices=quantizeToSMS(demo,{}); t4=indices.every(v=>v>=0&&v<64); }catch(e){ t4=false; } out.push(`<div>${t4?ok('Quantizer outputs indices in [0..63]'):bad('Quantizer index out of range')}</div>`);
-      let t5=false; try{ const demo2=makeDemoImageData(8); current={width:demo2.width,height:demo2.height,srcImageData:demo2,indices:null}; runConversion(); t5=!!(current.indices&&current.indices.length===demo2.width*demo2.height); }catch(e){ t5=false; } out.push(`<div>${t5?ok('Auto-conversion sets indices after load'):bad('Auto-conversion failed')}</div>`);
-      let t6=false; try{ const idx=new Uint8Array([1]); const pal=new Uint8Array(64*3); for(let i=0;i<64;i++){ const c=SMS_PALETTE[i]; pal[i*3]=c.r; pal[i*3+1]=c.g; pal[i*3+2]=c.b; } const png=encodeIndexedPNG(idx,1,1,pal); const chunks=parsePngChunks(png); const types=chunks.map(c=>c.type).join(','); const hasAll=['IHDR','PLTE','IDAT','IEND'].every(t=>types.includes(t)); const colorType=png[8+4+4+9]; t6=hasAll&&colorType===3; }catch(e){ t6=false; } out.push(`<div>${t6?ok('PNG has IHDR/PLTE/IDAT/IEND and indexed color type (3)'):bad('PNG chunk layout/color type wrong')}</div>`);
-      selfTestEl.innerHTML=out.join(''); document.getElementById('testPanel').open=true; }
-
     function initUI(){
       // surface runtime errors to the page
-      window.onerror = function(msg, src, line, col, err){ try{ const el=document.getElementById('selfTest'); el.innerHTML = `<div class='fail'>Runtime error: ${String(msg)} at ${src||''}:${line||''}:${col||''}</div>` + (el.innerHTML||''); document.getElementById('testPanel').open=true; }catch(_){} };
+      window.onerror = function(msg, src, line, col, err){ console.error('[SMS Converter] Runtime error:', msg, src, line, col, err); };
       console.log('[SMS Converter] init'); document.title = document.title + ' • preview';
-      fileInput=document.getElementById('file'); drop=document.getElementById('drop'); saveBtn=document.getElementById('save'); demoBtn=document.getElementById('demo'); selfTestBtn=document.getElementById('selftest'); ditherEl=document.getElementById('dither'); alphaEl=document.getElementById('preserveAlpha'); srcCanvas=document.getElementById('srcCanvas'); dstCanvas=document.getElementById('dstCanvas'); srcMeta=document.getElementById('srcMeta'); dstMeta=document.getElementById('dstMeta'); dstColorsMeta=document.getElementById('dstColorsMeta'); usedPaletteEl=document.getElementById('usedPalette'); paletteEl=document.getElementById('palette'); selfTestEl=document.getElementById('selfTest');
-      if(!srcCanvas||!dstCanvas){ console.error('Required canvas elements not found.'); if(selfTestEl){ selfTestEl.innerHTML='<span class="fail">Canvases missing. Check that #srcCanvas and #dstCanvas exist.</span>'; document.getElementById('testPanel').open=true; } return; }
+      fileInput=document.getElementById('file'); drop=document.getElementById('drop'); saveBtn=document.getElementById('save'); ditherEl=document.getElementById('dither'); alphaEl=document.getElementById('preserveAlpha'); srcCanvas=document.getElementById('srcCanvas'); dstCanvas=document.getElementById('dstCanvas'); srcMeta=document.getElementById('srcMeta'); dstMeta=document.getElementById('dstMeta'); dstColorsMeta=document.getElementById('dstColorsMeta'); usedPaletteEl=document.getElementById('usedPalette'); paletteEl=document.getElementById('palette'); if(!srcCanvas||!dstCanvas){ console.error('Required canvas elements not found.'); return; }
       renderFullPalette();
+      // Auto-load demo image on startup
+      (function(){ const demo=makeDemoImageData(128); applySource(demo,' (demo)'); })();
       fileInput.addEventListener('change',e=>{ const f=e.target.files&&e.target.files[0]; if(f) loadImage(f); });
       ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault(); e.stopPropagation(); drop.classList.add('drag');}));
       ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault(); e.stopPropagation(); drop.classList.remove('drag');}));
       drop.addEventListener('drop',e=>{ const f=e.dataTransfer.files&&e.dataTransfer.files[0]; if(f) loadImage(f); });
       const rerunIfReady=()=>{ if(current.srcImageData) runConversion(); }; ditherEl.addEventListener('change',rerunIfReady); alphaEl.addEventListener('change',rerunIfReady);
       saveBtn.addEventListener('click',()=>{ if(!current.indices){ alert('Nothing to save yet. Load an image first.'); return; } const PAL=new Uint8Array(SMS_PALETTE.length*3); for(let i=0;i<SMS_PALETTE.length;i++){ const c=SMS_PALETTE[i]; PAL[i*3]=c.r; PAL[i*3+1]=c.g; PAL[i*3+2]=c.b; } let trns=null; if(alphaEl.checked){ const aSrc=current.srcImageData.data; let anyTransparent=false; for(let i=0;i<aSrc.length;i+=4){ if(aSrc[i+3]===0){ anyTransparent=true; break; } } if(anyTransparent){ trns=new Uint8Array(64); trns[0]=0; for(let i=1;i<64;i++) trns[i]=255; } } const bytes=encodeIndexedPNG(current.indices,current.width,current.height,PAL,trns); const blob=new Blob([bytes],{type:'image/png'}); const a=document.createElement('a'); a.download='converted_sms_indexed.png'; a.href=URL.createObjectURL(blob); document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),5000); });
-      demoBtn.addEventListener('click',()=>{ const demo=makeDemoImageData(128); applySource(demo,' (demo)'); });
-      selfTestBtn.addEventListener('click',runSelfTests);
-      runSelfTests();
-    }
+                  }
 
     if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded',initUI); } else { initUI(); }
   </script>
