@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SMS Spritesheet Annotator & Metasprite Builder</title>
+  <style>
+    :root{--bg:#0b0d10;--panel:#12161b;--muted:#a7b0be;--accent:#2dd4bf;--accent2:#22d3ee;--border:#1f2937}
+    html,body{height:100%}
+    body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif;background:var(--bg);color:#e5e7eb}
+    header{padding:18px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px}
+    header h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+    header .sub{color:var(--muted);font-size:12px}
+    main{padding:16px;display:grid;grid-template-columns:360px 1fr;gap:16px}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    .left{padding:14px}
+    .controls{display:flex;flex-direction:column;gap:10px}
+    .drop{border:1.5px dashed #334155;border-radius:12px;padding:16px;text-align:center;color:var(--muted);background:#0f1318}
+    .drop.drag{border-color:var(--accent);color:#d1fae5}
+    input[type=file]{width:100%}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    button{appearance:none;border:1px solid #334155;background:#0f172a;color:#e5e7eb;padding:10px 12px;border-radius:10px;cursor:pointer;font-weight:600}
+    button.primary{background:var(--accent);border-color:transparent;color:#041214}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .panel{border:1px solid var(--border);border-radius:12px;overflow:hidden}
+    .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid var(--border);background:#0e1319;font-size:13px;color:#cbd5e1}
+    .panel .body{padding:12px}
+    canvas{width:100%;height:auto;image-rendering:pixelated;background:#000}
+    .meta{display:flex;gap:10px;flex-wrap:wrap;color:#a7b0be;font-size:12px;margin-top:8px}
+    .kbd{background:#0b1220;border:1px solid #1f2937;padding:1px 6px;border-radius:6px;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace}
+    .ms-list{display:flex;flex-direction:column;gap:8px; max-height:240px; overflow:auto}
+    .ms-item{display:flex;align-items:center;gap:8px; padding:6px 8px; border:1px solid #263241; border-radius:10px}
+    .ms-item.active{outline:2px solid var(--accent)}
+    .pill{font-size:11px; padding:2px 6px; border:1px solid #2b3647; border-radius:999px; color:#cbd5e1}
+    .field{display:flex; align-items:center; gap:6px}
+    .field input[type=number]{width:70px; padding:6px 8px; border-radius:8px; border:1px solid #2a3546; background:#0f172a; color:#e5e7eb}
+    .list{display:flex;flex-direction:column; gap:6px; max-height:200px; overflow:auto}
+    .part{display:grid; grid-template-columns:72px 1fr auto; gap:8px; align-items:center; padding:6px 8px; border:1px solid #2a3546; border-radius:10px}
+    .part.selected{outline:2px solid var(--accent2); background:#0d1420}
+    .tileprev{width:64px;height:64px; image-rendering:pixelated; background:#000; border-radius:8px; overflow:hidden; border:1px solid #2a3546}
+    .badge{font-size:10px; color:#a7b0be}
+    .origin{position:absolute; width:1px; height:1px}
+    .grid-toggle{display:flex; align-items:center; gap:8px}
+  </style>
+</head>
+<body>
+  <header class="card">
+    <h1>SMS Spritesheet Annotator & Metasprite Builder</h1>
+    <span class="sub">Load an indexed PNG. Mark metasprites composed of 8×8 tiles placed at signed offsets (−127..+127). Save metadata into a custom PNG chunk (<span class="kbd">smST</span>).</span>
+  </header>
+
+  <main>
+    <section class="left card">
+      <div class="controls">
+        <div class="drop" id="drop">
+          <div><strong>Drop an indexed PNG here</strong> or use the file picker</div>
+          <div class="meta">Indexed PNG (color type 3, 8-bit). Reads/writes custom chunk <span class="kbd">smST</span>.</div>
+        </div>
+        <input id="file" type="file" accept="image/png" />
+        <div class="row">
+          <button id="newMs">New metasprite</button>
+          <button id="savePng" disabled>Save PNG + smST</button>
+        </div>
+        <div class="row">
+          <div class="field"><span class="badge">Origin</span>
+            <label>x <input id="originX" type="number" value="0" min="-127" max="127" step="1"></label>
+            <label>y <input id="originY" type="number" value="0" min="-127" max="127" step="1"></label>
+          </div>
+        </div>
+        <div class="row grid-toggle">
+          <input id="showGrid" type="checkbox" checked>
+          <label for="showGrid">Show 8×8 grid (click a cell to add tile to current metasprite)</label>
+        </div>
+        <div class="panel">
+          <h3>Metasprites</h3>
+          <div class="body ms-list" id="msList"></div>
+        </div>
+        <div class="panel">
+          <h3>Parts for selected metasprite</h3>
+          <div class="body list" id="partsList"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="right card">
+      <div class="panel">
+        <h3>Spritesheet</h3>
+        <div class="body">
+          <canvas id="sheet"></canvas>
+          <div id="sheetMeta" class="meta"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Preview Selected Metasprite</h3>
+        <div class="body">
+          <canvas id="preview"></canvas>
+          <div class="meta" id="previewMeta"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===== PNG helpers (CRC32, chunks, encoder for indexed with optional tRNS) ===== -->
+  <script>
+    const CRC_TABLE = new Uint32Array(256);(function(){for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);CRC_TABLE[n]=c>>>0;}})();
+    function crc32(buf,off=0,len=buf.length){let c=0xFFFFFFFF;for(let i=off;i<off+len;i++)c=CRC_TABLE[(c^buf[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0}
+    const be32=n=>new Uint8Array([n>>>24&255,n>>>16&255,n>>>8&255,n&255]);
+    function chunk(typeStr,data){const type=new TextEncoder().encode(typeStr);const len=be32(data.length);const out=new Uint8Array(12+data.length);out.set(len,0);out.set(type,4);out.set(data,8);const c=crc32(out,4,4+data.length);out.set(be32(c),8+data.length);return out}
+    function encodeIndexedPNG(indexBytes,width,height,palette,transparency,extraChunks){
+      if(palette.length%3!==0)throw new Error('Palette must be 3*N bytes');
+      const sig=new Uint8Array([137,80,78,71,13,10,26,10]);
+      const ihdr=new Uint8Array(13);ihdr.set(be32(width),0);ihdr.set(be32(height),4);ihdr[8]=8;ihdr[9]=3;ihdr[10]=0;ihdr[11]=0;ihdr[12]=0;const IHDR=chunk('IHDR',ihdr);
+      const PLTE=chunk('PLTE',palette);const TRNS=(transparency&&transparency.length>0)?chunk('tRNS',transparency):null;
+      // Filter 0 scanlines
+      const raw=new Uint8Array(height*(1+width));for(let y=0;y<height;y++){raw[y*(width+1)]=0;raw.set(indexBytes.subarray(y*width,(y+1)*width),y*(width+1)+1)}
+      // Zlib store
+      function adler32(buf){let a=1,b=0;for(let i=0;i<buf.length;i++){a=(a+buf[i])%65521;b=(b+a)%65521}return((b<<16)>>>0)|(a>>>0)}
+      const CMF=0x78,FLG=0x01;const parts=[];let pos=0;while(pos<raw.length){const len=Math.min(65535,raw.length-pos);const isFinal=(pos+len===raw.length)?1:0;parts.push(isFinal);parts.push(len&255,(len>>>8)&255,(~len)&255,((~len)>>>8)&255);for(let i=0;i<len;i++)parts.push(raw[pos+i]);pos+=len}
+      const body=new Uint8Array(parts);const ad=adler32(raw);const z=new Uint8Array(2+body.length+4);z[0]=CMF;z[1]=FLG;z.set(body,2);z[z.length-4]=(ad>>>24)&255;z[z.length-3]=(ad>>>16)&255;z[z.length-2]=(ad>>>8)&255;z[z.length-1]=ad&255;
+      const IDAT=chunk('IDAT',z);const IEND=chunk('IEND',new Uint8Array());
+      // assemble
+      let extraLen=0; if(extraChunks){for(const ch of extraChunks) extraLen+=ch.length}
+      const total=sig.length+IHDR.length+PLTE.length+(TRNS?TRNS.length:0)+IDAT.length+extraLen+IEND.length;const png=new Uint8Array(total);let o=0;
+      png.set(sig,o);o+=sig.length;png.set(IHDR,o);o+=IHDR.length;png.set(PLTE,o);o+=PLTE.length;if(TRNS){png.set(TRNS,o);o+=TRNS.length}png.set(IDAT,o);o+=IDAT.length;if(extraChunks){for(const ch of extraChunks){png.set(ch,o);o+=ch.length}}png.set(IEND,o);
+      return png;
+    }
+  </script>
+
+  <!-- ===== App logic ===== -->
+  <script>
+    const drop = document.getElementById('drop');
+    const fileInput = document.getElementById('file');
+    const newMsBtn = document.getElementById('newMs');
+    const saveBtn = document.getElementById('savePng');
+    const sheetCanvas = document.getElementById('sheet');
+    const sheetCtx = sheetCanvas.getContext('2d', { willReadFrequently:true });
+    const previewCanvas = document.getElementById('preview');
+    const previewCtx = previewCanvas.getContext('2d', { willReadFrequently:true });
+    const sheetMeta = document.getElementById('sheetMeta');
+    const previewMeta = document.getElementById('previewMeta');
+    const showGridEl = document.getElementById('showGrid');
+    const msList = document.getElementById('msList');
+    const partsList = document.getElementById('partsList');
+    const originXEl = document.getElementById('originX');
+    const originYEl = document.getElementById('originY');
+
+    // Image/PNG state
+    let W=0,H=0; let palette=null, trns=null; let indices=null; // Uint8Array (w*h)
+    // Project state (metadata to embed)
+    let project = { format:'sms-tools', version:1,
+      sheet:{ pixelSize:[0,0], tileSize:[8,8], gridOrigin:[0,0] },
+      metasprites:[]
+    };
+    let activeMs = -1;
+    let selectedPart = -1; // index in current metasprite, for keyboard nudging
+
+    // --- PNG parse: IHDR/PLTE/tRNS ---
+    function parsePNGToState(buf){
+      const u8=new Uint8Array(buf); const sig=[137,80,78,71,13,10,26,10]; for(let i=0;i<8;i++){ if(u8[i]!==sig[i]) throw new Error('Not a PNG'); }
+      let off=8; let gotIHDR=false; let plte=null; let trnsLocal=null; let smst=null;
+      while(off<u8.length){
+        const len=(u8[off]<<24)|(u8[off+1]<<16)|(u8[off+2]<<8)|u8[off+3]; off+=4;
+        const type=String.fromCharCode(u8[off],u8[off+1],u8[off+2],u8[off+3]); off+=4;
+        const dataOff=off; off+=len; off+=4; // skip CRC
+        if(type==='IHDR'){
+          gotIHDR=true; W=(u8[dataOff]<<24)|(u8[dataOff+1]<<16)|(u8[dataOff+2]<<8)|u8[dataOff+3]; H=(u8[dataOff+4]<<24)|(u8[dataOff+5]<<16)|(u8[dataOff+6]<<8)|u8[dataOff+7];
+          const bitDepth=u8[dataOff+8]; const colorType=u8[dataOff+9]; if(bitDepth!==8||colorType!==3) throw new Error('Image must be indexed (8-bit, type 3).');
+        } else if(type==='PLTE') plte=u8.slice(dataOff,dataOff+len);
+        else if(type==='tRNS') trnsLocal=u8.slice(dataOff,dataOff+len);
+        else if(type==='smST') smst = new TextDecoder().decode(u8.slice(dataOff,dataOff+len));
+        else if(type==='IEND') break;
+      }
+      if(!gotIHDR||!plte) throw new Error('Missing IHDR/PLTE');
+      palette=plte; trns=trnsLocal||null; project.sheet.pixelSize=[W,H];
+      if(smst){ try{ const meta=JSON.parse(smst); if(meta&&meta.format==='sms-tools') project=meta; }catch(e){ console.warn('Failed to parse smST:', e); }}
+    }
+
+    function drawSheetFromImage(img){
+      W=img.naturalWidth; H=img.naturalHeight; sheetCanvas.width=W; sheetCanvas.height=H; sheetCtx.clearRect(0,0,W,H); sheetCtx.drawImage(img,0,0); sheetMeta.textContent=`${W}×${H}px • click grid cells (8×8) to add tiles`;
+      saveBtn.disabled=false;
+      renderPreview();
+    }
+
+    function rebuildIndicesFromCanvas(){
+      const rd=document.createElement('canvas'); rd.width=W; rd.height=H; const rctx=rd.getContext('2d',{willReadFrequently:true}); rctx.drawImage(sheetCanvas,0,0); const rgba=rctx.getImageData(0,0,W,H).data; const map=new Map(); for(let i=0;i<palette.length;i+=3){ const r=palette[i],g=palette[i+1],b=palette[i+2]; map.set((r<<16)|(g<<8)|b, i/3); }
+      const out=new Uint8Array(W*H); for(let p=0,pi=0;p<rgba.length;p+=4,pi++){ const a=rgba[p+3]; if(a===0&&trns){ let tIndex=trns.findIndex(v=>v===0); if(tIndex<0) tIndex=0; out[pi]=tIndex; continue;} const key=(rgba[p]<<16)|(rgba[p+1]<<8)|rgba[p+2]; const idx=map.get(key); if(idx===undefined) throw new Error('Pixel not in PLTE'); out[pi]=idx; }
+      indices=out;
+    }
+
+    // --- UI metasprite handling ---
+    function addMetasprite(name){
+      project.metasprites.push({name, origin:[0,0], parts:[]});
+      activeMs = project.metasprites.length-1;
+      refreshMsUI();
+    }
+    function clamp127(v){ return Math.max(-127, Math.min(127, v|0)); }
+
+    function refreshMsUI(){
+      // metasprite list
+      msList.innerHTML='';
+      project.metasprites.forEach((ms,idx)=>{
+        const li=document.createElement('div'); li.className='ms-item'+(idx===activeMs?' active':'');
+        const rn=document.createElement('span'); rn.className='pill'; rn.textContent=ms.name; li.appendChild(rn);
+        const stats=document.createElement('span'); stats.className='badge'; stats.textContent=`${ms.parts.length} parts`; li.appendChild(stats);
+        const btn=document.createElement('button'); btn.textContent='Select'; btn.addEventListener('click',()=>{activeMs=idx; originXEl.value=ms.origin[0]; originYEl.value=ms.origin[1]; renderPreview(); refreshMsUI();}); li.appendChild(btn);
+        const del=document.createElement('button'); del.textContent='Delete'; del.addEventListener('click',()=>{ if(!confirm('Delete metasprite '+ms.name+'?'))return; project.metasprites.splice(idx,1); if(activeMs>=project.metasprites.length) activeMs=project.metasprites.length-1; refreshMsUI(); renderPreview(); }); li.appendChild(del);
+        msList.appendChild(li);
+      });
+
+      // parts list
+      partsList.innerHTML='';
+      if(activeMs<0) return;
+      const ms=project.metasprites[activeMs];
+      originXEl.value=ms.origin[0]; originYEl.value=ms.origin[1];
+      ms.parts.forEach((p,i)=>{
+        const row=document.createElement('div'); row.className='part'+(i===selectedPart?' selected':''); row.tabIndex=0;
+        const prev=document.createElement('canvas'); prev.width=64; prev.height=64; prev.className='tileprev'; const g=prev.getContext('2d'); g.imageSmoothingEnabled=false; g.drawImage(sheetCanvas,p.src[0],p.src[1],8,8,0,0,64,64); row.appendChild(prev);
+        const info=document.createElement('div'); info.innerHTML=`<div class=\"badge\">src=(${p.src[0]},${p.src[1]})</div>`; row.appendChild(info);
+        const ctrls=document.createElement('div');
+        const xIn=document.createElement('input'); xIn.type='number'; xIn.value=p.offset[0]; xIn.min=-127; xIn.max=127; xIn.step=1; xIn.addEventListener('input',()=>{p.offset[0]=clamp127(xIn.value); renderPreview();}); ctrls.append('x ',xIn,' ');
+        const yIn=document.createElement('input'); yIn.type='number'; yIn.value=p.offset[1]; yIn.min=-127; yIn.max=127; yIn.step=1; yIn.addEventListener('input',()=>{p.offset[1]=clamp127(yIn.value); renderPreview();}); ctrls.append('y ',yIn,' ');
+        const rm=document.createElement('button'); rm.textContent='Remove'; rm.addEventListener('click',()=>{ ms.parts.splice(i,1); if(selectedPart===i) selectedPart=-1; else if(selectedPart>i) selectedPart--; refreshMsUI(); renderPreview(); }); ctrls.appendChild(rm);
+        row.appendChild(ctrls);
+        row.addEventListener('click',()=>{ selectedPart=i; refreshMsUI(); renderPreview(); });
+        partsList.appendChild(row);
+      });
+    }
+
+    // click on sheet to add 8x8 tile to current metasprite
+    sheetCanvas.addEventListener('click', (e)=>{
+      if(activeMs<0) { alert('Create/select a metasprite first.'); return; }
+      const rect=sheetCanvas.getBoundingClientRect(); const x=Math.floor((e.clientX-rect.left)/rect.width*W); const y=Math.floor((e.clientY-rect.top)/rect.height*H);
+      const sx=(x>>3)<<3, sy=(y>>3)<<3; // snap to 8x8 source
+      const ms=project.metasprites[activeMs];
+      ms.parts.push({ src:[sx,sy], offset:[0,0] });
+      selectedPart = ms.parts.length-1;
+      refreshMsUI(); renderPreview();
+    });
+
+    // show 8x8 grid overlay
+    function drawGrid(){ if(!showGridEl.checked) return; sheetCtx.save(); sheetCtx.strokeStyle='rgba(255,255,255,0.13)'; sheetCtx.lineWidth=1; for(let x=0;x<=W;x+=8){ sheetCtx.beginPath(); sheetCtx.moveTo(x+0.5,0); sheetCtx.lineTo(x+0.5,H); sheetCtx.stroke(); } for(let y=0;y<=H;y+=8){ sheetCtx.beginPath(); sheetCtx.moveTo(0,y+0.5); sheetCtx.lineTo(W,y+0.5); sheetCtx.stroke(); } sheetCtx.restore(); }
+
+    showGridEl.addEventListener('change',()=>{ redrawSheet(); });
+
+    function redrawSheet(){ sheetCtx.clearRect(0,0,W,H); sheetCtx.drawImage(_img,0,0); drawGrid(); drawMetaspriteBoxes(); }
+
+    function drawMetaspriteBoxes(){
+      if(activeMs<0) return;
+      const ms=project.metasprites[activeMs];
+      sheetCtx.save();
+      sheetCtx.lineWidth=1.5;
+      ms.parts.forEach((p,i)=>{
+        sheetCtx.strokeStyle = (i===selectedPart)?'rgba(34,211,238,0.95)':'rgba(34,211,238,0.5)';
+        sheetCtx.strokeRect(p.src[0]+0.5, p.src[1]+0.5, 8,8);
+      });
+      sheetCtx.restore();
+    }
+
+    // origin controls
+    originXEl.addEventListener('input', ()=>{ if(activeMs<0) return; project.metasprites[activeMs].origin[0]=clamp127(originXEl.value); renderPreview(); });
+    originYEl.addEventListener('input', ()=>{ if(activeMs<0) return; project.metasprites[activeMs].origin[1]=clamp127(originYEl.value); renderPreview(); });
+
+    // render preview of active metasprite
+    function renderPreview(){
+      previewCanvas.width=160; previewCanvas.height=160; previewCtx.imageSmoothingEnabled=false; previewCtx.fillStyle='#000'; previewCtx.fillRect(0,0,previewCanvas.width,previewCanvas.height);
+      if(activeMs<0){ previewMeta.textContent='No metasprite selected'; redrawSheet(); return; }
+      const ms=project.metasprites[activeMs];
+      const ox=80+ms.origin[0], oy=80+ms.origin[1];
+      ms.parts.forEach((p,i)=>{
+        previewCtx.drawImage(sheetCanvas, p.src[0],p.src[1],8,8, ox+p.offset[0], oy+p.offset[1], 8,8);
+        if(i===selectedPart){ previewCtx.strokeStyle='#22d3ee'; previewCtx.strokeRect(ox+p.offset[0]-0.5, oy+p.offset[1]-0.5, 9,9); }
+      });
+      // crosshair at origin (0,0)
+      previewCtx.strokeStyle='#f59e0b'; previewCtx.beginPath(); previewCtx.moveTo(ox-6,oy); previewCtx.lineTo(ox+6,oy); previewCtx.moveTo(ox,oy-6); previewCtx.lineTo(ox,oy+6); previewCtx.stroke();
+      previewMeta.textContent=`${ms.parts.length} parts • origin=(${ms.origin[0]},${ms.origin[1]})`;
+      redrawSheet();
+    }
+
+    // New metasprite button
+    newMsBtn.addEventListener('click', ()=>{
+      const name=prompt('Name of new metasprite?','sprite'); if(!name) return; addMetasprite(name);
+      renderPreview();
+    });
+
+    // Save with custom smST chunk
+    saveBtn.addEventListener('click', ()=>{
+      try{
+        if(!indices) rebuildIndicesFromCanvas();
+        // clamp all offsets
+        for(const ms of project.metasprites){ ms.origin[0]=clamp127(ms.origin[0]); ms.origin[1]=clamp127(ms.origin[1]); for(const p of ms.parts){ p.offset[0]=clamp127(p.offset[0]); p.offset[1]=clamp127(p.offset[1]); }}
+        const metaJson = JSON.stringify(project);
+        const smstChunk = chunk('smST', new TextEncoder().encode(metaJson));
+        const png = encodeIndexedPNG(indices,W,H,palette,trns,[smstChunk]);
+        const blob = new Blob([png],{type:'image/png'});
+        const a=document.createElement('a'); a.download='annotated.png'; a.href=URL.createObjectURL(blob); document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+      }catch(e){ console.error(e); alert(e.message||String(e)); }
+    });
+
+    // File/DnD load
+    fileInput.addEventListener('change', e=>{ const f=e.target.files&&e.target.files[0]; if(f) loadFile(f); });
+    ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault(); e.stopPropagation(); drop.classList.add('drag');}));
+    ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault(); e.stopPropagation(); drop.classList.remove('drag');}));
+    drop.addEventListener('drop', e=>{ const f=e.dataTransfer.files&&e.dataTransfer.files[0]; if(f) loadFile(f); });
+
+    let _img = null;
+    async function loadFile(file){
+      try{
+        const ab = await file.arrayBuffer();
+        parsePNGToState(ab);
+        // draw image from blob
+        const url = URL.createObjectURL(file); const img=new Image(); img.onload=()=>{ try{ _img=img; drawSheetFromImage(img); } finally { URL.revokeObjectURL(url);} }; img.onerror=()=>{ URL.revokeObjectURL(url); alert('Failed to load image element');}; img.src=url;
+      }catch(e){ console.error(e); alert(e.message||String(e)); }
+    }
+
+    // --- Demo image on startup (indexed) ---
+    function buildSMSPalette(){ const steps=[0,85,170,255]; const pal=[]; for(let r of steps){ for(let g of steps){ for(let b of steps){ pal.push(r,g,b); } } } return new Uint8Array(pal); }
+    function makeDemoIndexed(size=128){
+      const pal = buildSMSPalette();
+      const w=size,h=size; const idx=new Uint8Array(w*h);
+      const colors=[1,5,10,20,40,60];
+      for(let y=0;y<h;y++) for(let x=0;x<w;x++){ const zone=((x/16)|0)+(((y/16)|0)%6); idx[y*w+x]=colors[zone%colors.length]; }
+      return {W:w,H:h, indices:idx, palette:pal, trns:null};
+    }
+    function paintDemoToCanvas(d){ W=d.W; H=d.H; sheetCanvas.width=W; sheetCanvas.height=H; const im=new ImageData(W,H); const pal=d.palette; for(let y=0;y<H;y++)for(let x=0;x<W;x++){ const idx=d.indices[y*W+x]; const r=pal[idx*3],g=pal[idx*3+1],b=pal[idx*3+2]; const o=((y*W+x)<<2); im.data[o]=r; im.data[o+1]=g; im.data[o+2]=b; im.data[o+3]=255; } sheetCtx.putImageData(im,0,0); palette=d.palette; trns=d.trns; indices=d.indices; sheetMeta.textContent=`${W}×${H}px (demo)`; _img=document.createElement('img'); _img.src=sheetCanvas.toDataURL(); saveBtn.disabled=false; renderPreview(); }
+
+    // startup
+    window.addEventListener('DOMContentLoaded',()=>{
+      // demo project
+      project = { format:'sms-tools', version:1, sheet:{ pixelSize:[0,0], tileSize:[8,8], gridOrigin:[0,0] }, metasprites:[{name:'hero_idle', origin:[0,0], parts:[]} ] };
+      activeMs=0; originXEl.value=0; originYEl.value=0; refreshMsUI();
+      paintDemoToCanvas(makeDemoIndexed(128));
+      runSelfTests();
+    });
+
+    // Keyboard nudging for selected part (arrow keys, Shift=×8)
+    window.addEventListener('keydown', (e)=>{
+      if(activeMs<0) return; if(selectedPart<0) return;
+      const ms=project.metasprites[activeMs]; const p=ms.parts[selectedPart]; if(!p) return;
+      const step = e.shiftKey ? 8 : 1; let handled=false;
+      if(e.key==='ArrowLeft'){ p.offset[0]=clamp127(p.offset[0]-step); handled=true; }
+      else if(e.key==='ArrowRight'){ p.offset[0]=clamp127(p.offset[0]+step); handled=true; }
+      else if(e.key==='ArrowUp'){ p.offset[1]=clamp127(p.offset[1]-step); handled=true; }
+      else if(e.key==='ArrowDown'){ p.offset[1]=clamp127(p.offset[1]+step); handled=true; }
+      if(handled){ e.preventDefault(); refreshMsUI(); renderPreview(); }
+    });
+
+    // -------- Console self-tests (lightweight) --------
+    function runSelfTests(){
+      try{
+        const tests=[]; const ok=(name,cond)=>tests.push(`${cond?'✅':'❌'} ${name}`);
+        ok('clamp127 lower bound', clamp127(-999)===-127);
+        ok('clamp127 upper bound', clamp127(999)===127);
+        ok('PNG encoder signature', (function(){
+          const pal=new Uint8Array([0,0,0, 255,0,0]);
+          const idx=new Uint8Array([0]);
+          const png=encodeIndexedPNG(idx,1,1,pal,null);
+          return png[0]===137&&png[1]===80&&png[2]===78&&png[3]===71&&png[4]===13&&png[5]===10&&png[6]===26&&png[7]===10;
+        })());
+        console.log('[Spritesheet Annotator self-tests]\n'+tests.join('\n'));
+      }catch(e){ console.warn('Self-tests failed:', e); }
+    }
+  </script>
+</body>
+</html>
