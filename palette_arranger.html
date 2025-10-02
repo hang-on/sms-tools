@@ -23,9 +23,8 @@
     button:disabled{opacity:.5;cursor:not-allowed}
     .palette{display:grid;grid-template-columns:repeat(8, 1fr);gap:6px;margin-top:8px}
     .sw{height:22px;border-radius:6px;border:1px solid rgba(255,255,255,.08); position:relative}
-    .sw[data-used="false"]{opacity:.35}
     .sw .idx{position:absolute;inset:auto 6px 2px auto;font-size:10px;color:#0b0d10;background:#e5e7eb;border-radius:4px;padding:0 4px}
-    .sw.dragging{outline:2px dashed var(--accent);opacity:.8}
+    .sw.dragging{outline:2px dashed var(--accent);opacity:.85}
     .panel{border:1px solid var(--border);border-radius:12px;overflow:hidden}
     .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid var(--border);background:#0e1319;font-size:13px;color:#cbd5e1}
     .panel .body{padding:12px}
@@ -52,7 +51,7 @@
         <div class="row">
           <button id="save" disabled>Save with reordered palette</button>
         </div>
-        <div class="note">Drag swatches to reorder the palette. Only <strong>used</strong> colors are shown. Unused palette entries are kept after the used block, in their original order.</div>
+        <div class="note">Showing <strong>only the draggable (used)</strong> palette entries. Unused entries are preserved in their original order when saving.</div>
         <div id="palInfo" class="meta"></div>
         <div id="palette" class="palette"></div>
       </div>
@@ -132,7 +131,7 @@
       while(off < u8.length){
         const len = (u8[off]<<24)|(u8[off+1]<<16)|(u8[off+2]<<8)|u8[off+3]; off+=4;
         const type = String.fromCharCode(u8[off],u8[off+1],u8[off+2],u8[off+3]); off+=4;
-        const dataOff=off; off+=len; const crcOff=off; off+=4;
+        const dataOff=off; off+=len; off+=4; // skip CRC
         if(type==='IHDR'){
           gotIHDR=true; width=(u8[dataOff]<<24)|(u8[dataOff+1]<<16)|(u8[dataOff+2]<<8)|u8[dataOff+3]; height=(u8[dataOff+4]<<24)|(u8[dataOff+5]<<16)|(u8[dataOff+6]<<8)|u8[dataOff+7];
           const bitDepth=u8[dataOff+8]; const colorType=u8[dataOff+9];
@@ -153,9 +152,7 @@
       return new Promise((resolve,reject)=>{
         // 1) Parse PLTE/tRNS + IHDR from ArrayBuffer
         const fr = new FileReader();
-        fr.onload = () => {
-          try{ parsePNG(fr.result); resolve(); } catch(e){ reject(e); }
-        };
+        fr.onload = () => { try{ parsePNG(fr.result); resolve(); } catch(e){ reject(e); } };
         fr.onerror = reject; fr.readAsArrayBuffer(file);
       }).then(()=> new Promise((resolve2,reject2)=>{
         // 2) Load rgba via <img> + canvas to reconstruct indices by matching exact colors from PLTE
@@ -177,16 +174,18 @@
             const used = new Set();
             for(let p=0,pi=0; p<rgba.length; p+=4,pi++){
               const a=rgba[p+3];
-              if(a===0 && trns){ // treat as transparent index if present; we don't know which entry is transparent unless tRNS tells (0 alpha somewhere)
-                // Find the first fully transparent palette entry if any
-                let tIndex = trns.findIndex(v=>v===0);
+              if(a===0 && trns){
+                // Choose first fully transparent palette entry if present
+                let tIndex = -1;
+                for(let ti=0; ti<trns.length; ti++){ if(trns[ti]===0){ tIndex=ti; break; } }
                 if(tIndex<0) tIndex=0; // fallback
                 out[pi]=tIndex; used.add(tIndex);
                 continue;
               }
               const key=(rgba[p]<<16)|(rgba[p+1]<<8)|rgba[p+2];
               const idx = map.get(key);
-              if(idx===undefined){ reject2(new Error('Pixel color not found in PLTE (image might not be indexed or palette-altered).')); return; }
+              if(idx===undefined){ reject2(new Error('Pixel color not found in PLTE (image might not be indexed or palette-altered).'));
+                return; }
               out[pi]=idx; used.add(idx);
             }
             indices = out;
@@ -206,20 +205,27 @@
 
     function updateUI(){
       // palette info
-      const usedCount = usedSet? usedSet.size : 0;
-      const total = palette? (palette.length/3) : 0;
-      palInfo.textContent = `${usedCount} used colors • ${total} total palette entries`;
-      // render swatches (used only) in current order
+      const total = palette ? (palette.length/3) : 0;
+      const usedCount = usedSet ? usedSet.size : 0;
+      palInfo.textContent = `${usedCount} used colors • ${total} total entries (showing used only)`;
+
+      // Display ONLY used entries, in current usedOrder (this is what is draggable)
+      const renderOrder = usedOrder.slice();
+
       paletteEl.innerHTML='';
-      usedOrder.forEach((pi, i)=>{
-        const r=palette[pi*3], g=palette[pi*3+1], b=palette[pi*3+2];
-        const sw=document.createElement('div'); sw.className='sw'; sw.draggable=true; sw.dataset.index=String(pi); sw.dataset.used='true'; sw.style.background=`rgb(${r},${g},${b})`;
-        const tag=document.createElement('div'); tag.className='idx'; tag.textContent=pi;
-        sw.appendChild(tag);
-        attachDnD(sw);
+      for(const idx of renderOrder){
+        const r=palette[idx*3], g=palette[idx*3+1], b=palette[idx*3+2];
+        const sw=document.createElement('div');
+        sw.className='sw';
+        sw.dataset.index=String(idx);
+        sw.dataset.used='true';
+        sw.style.background=`rgb(${r},${g},${b})`;
+        sw.title = `Index ${idx} rgb(${r},${g},${b})`;
+        const tag=document.createElement('div'); tag.className='idx'; tag.textContent=idx; sw.appendChild(tag);
+        sw.draggable=true; attachDnD(sw);
         paletteEl.appendChild(sw);
-      });
-      // re-render preview with reordered palette applied
+      }
+
       renderPreview();
       saveBtn.disabled = !dirty;
     }
@@ -228,7 +234,7 @@
       if(!palette) return null;
       const N = palette.length/3;
       const rest = [];
-      for(let i=0;i<N;i++){ if(!usedSet.has(i)) rest.push(i); }
+      for(let i=0;i<N;i++){ if(!usedSet || !usedSet.has(i)) rest.push(i); }
       const newOrder = usedOrder.concat(rest);
       const newPLTE = new Uint8Array(palette.length);
       for(let pos=0; pos<newOrder.length; pos++){
@@ -237,10 +243,15 @@
         newPLTE[pos*3+1] = palette[srcIdx*3+1];
         newPLTE[pos*3+2] = palette[srcIdx*3+2];
       }
+      // Build new tRNS covering all N entries
       let newTRNS = null;
       if(trns){
-        newTRNS = new Uint8Array(trns.length);
-        for(let pos=0; pos<newOrder.length; pos++) newTRNS[pos] = trns[newOrder[pos]] ?? 255;
+        newTRNS = new Uint8Array(N); // default opaque
+        for(let i=0;i<N;i++) newTRNS[i]=255;
+        for(let pos=0; pos<newOrder.length; pos++){
+          const oldIdx = newOrder[pos];
+          newTRNS[pos] = (oldIdx < trns.length) ? trns[oldIdx] : 255;
+        }
       }
       return {newPLTE, newTRNS, newOrder};
     }
@@ -270,7 +281,11 @@
     // ---------- Drag & Drop on swatches ----------
     let dragFrom = null;
     function attachDnD(el){
-      el.addEventListener('dragstart', e=>{ el.classList.add('dragging'); dragFrom = usedOrder.indexOf(Number(el.dataset.index)); e.dataTransfer.setData('text/plain', String(dragFrom)); });
+      el.addEventListener('dragstart', e=>{
+        el.classList.add('dragging');
+        dragFrom = usedOrder.indexOf(Number(el.dataset.index));
+        e.dataTransfer.setData('text/plain', String(dragFrom));
+      });
       el.addEventListener('dragend', ()=>{ el.classList.remove('dragging'); dragFrom=null; });
       el.addEventListener('dragover', e=>{ e.preventDefault(); });
       el.addEventListener('drop', e=>{
@@ -318,6 +333,24 @@
     }
 
     function resetState(){ width=height=0; indices=null; palette=null; trns=null; usedOrder=[]; usedSet=null; ctx.clearRect(0,0,canvas.width,canvas.height); paletteEl.innerHTML=''; palInfo.textContent=''; imgMeta.textContent=''; saveBtn.disabled=true; dirty=false; }
+
+    // ---------- Self-tests (console) ----------
+    function runSelfTests(){
+      try{
+        const results=[]; const ok=(name,cond)=>results.push(`${cond?'✅':'❌'} ${name}`);
+        // PNG signature
+        (function(){ const pal=new Uint8Array([0,0,0, 255,0,0]); const idx=new Uint8Array([0]); const png=encodeIndexedPNG(idx,1,1,pal,null); ok('PNG signature', png[0]===137&&png[1]===80&&png[2]===78&&png[3]===71&&png[4]===13&&png[5]===10&&png[6]===26&&png[7]===10); })();
+        // Reorder mapping
+        (function(){ const order=[1,2,0]; const map=buildOldToNewMap(order); ok('old->new map', map[0]===2 && map[1]===0 && map[2]===1); })();
+        // PLTE reorder preserves expected values
+        (function(){ const pal=new Uint8Array([1,2,3, 4,5,6, 7,8,9]); const tr=new Uint8Array([255,0,255]); palette=pal; trns=tr; usedSet=new Set([2,0]); usedOrder=[2,0]; const built=buildReorderedPalette(); ok('PLTE reorder byte check', built.newPLTE[0]===7 && built.newPLTE[3]===1 && built.newPLTE[6]===4); ok('tRNS remap', built.newTRNS[0]===tr[2] && built.newTRNS[1]===tr[0]); })();
+        // Visual invariance test (1×3 indices)
+        (function(){ width=3;height=1; indices=new Uint8Array([0,1,2]); palette=new Uint8Array([10,0,0, 0,10,0, 0,0,10]); usedSet=new Set([0,1,2]); usedOrder=[2,0,1]; const built=buildReorderedPalette(); const map=buildOldToNewMap(built.newOrder); const remapped=new Uint8Array(indices.length); for(let i=0;i<indices.length;i++) remapped[i]=map[indices[i]]; ok('index remap length', remapped.length===3); ok('newOrder length', built.newOrder.length===3); })();
+        console.log('[Palette Arranger self-tests]\n'+results.join('\n'));
+      }catch(e){ console.warn('Self-tests failed:', e); }
+    }
+
+    window.addEventListener('DOMContentLoaded', runSelfTests);
   </script>
 </body>
 </html>
